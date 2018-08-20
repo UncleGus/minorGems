@@ -458,18 +458,9 @@ function ts_sellTicket() {
         
         return;  /* FAILED CHECK */
         }
-
-
-    $name = ts_requestFilter( "name", "/[A-Z0-9.' -]+/i" );
-
-    // some names have ' in them
-    // need to escape this for use in DB query
-    $name = mysqli_real_escape_string( $ts_mysqlLink, $name );
     
 
         
-    $email = ts_requestFilter( "email", "/[A-Z0-9._%+-]+@[A-Z0-9.-]+/i" );
-
     $order_number = ts_requestFilter( "reference", "/[A-Z0-9-]+/i" );
 
 
@@ -500,86 +491,160 @@ function ts_sellTicket() {
     
 
     
-    $found_unused_id = 0;
-    $salt = 0;
+
+    $bulk = ts_requestFilter( "bulk", "/[01]/", "0" );
+
+    $emailList = array();
+
     
-    
-    while( ! $found_unused_id ) {
-
+    if( ! $bulk ) {
         
-        
-        $ticket_id = "";
+        $email = ts_requestFilter( "email", "/[A-Z0-9._%+-]+@[A-Z0-9.-]+/i" );
 
-        // repeat hashing new rand values, mixed with our secret
-        // for security, until we have generated enough digits.
-        while( strlen( $ticket_id ) < $ticketIDLength ) {
+        $emailList[] = $email;
+        }
+    else {
 
-            $randVal = rand();
-            
-            $hash_bin =
-                ts_hmac_sha1_raw( $ticketGenerationSecret,
-                                  $name . uniqid( "$randVal"."$salt", true ) );
-
-            
-            $hash_base32 = ts_readableBase32Encode( $hash_bin );
-
-            $digitsLeft = $ticketIDLength - strlen( $ticket_id );
-
-            $ticket_id = $ticket_id . substr( $hash_base32, 0, $digitsLeft );
+        $emails = "";
+        if( isset( $_REQUEST[ "emails" ] ) ) {
+            $emails = $_REQUEST[ "emails" ];
             }
+    
+        $emailList = preg_split( "/\s+/", $emails );
+        }
 
+    $failedCount = 0;
+    $successCount = 0;
+
+    foreach( $emailList as $email ) {
         
-        // break into "-" separated chunks of 5 digits
-        $ticket_id_chunks = str_split( $ticket_id, 5 );
+        $unfilteredEmail = $email;
+        $email = ts_filter( $email, "/[A-Z0-9._%+-]+@[A-Z0-9.-]+/i", "" );
 
-        $ticket_id = implode( "-", $ticket_id_chunks );
-        
-        
-
-        /*
-"ticket_id VARCHAR(255) NOT NULL PRIMARY KEY," .
-            "sale_date DATETIME NOT NULL," .
-            "last_download_date DATETIME NOT NULL," .
-            "name TEXT NOT NULL, ".
-            "email CHAR(255) NOT NULL," .
-            "order_number CHAR(255) NOT NULL," .
-            "tag CHAR(255) NOT NULL," .
-            "coupon_code TEXT NOT NULL," .
-            "email_sent TINYINT NOT NULL," .
-            "blocked TINYINT NOT NULL," .
-            "download_count INT, ".
-            "email_opt_in TINYINT NOT NULL );";
-         */
-
-
-        // opt-in to emails by default
-        $query = "INSERT INTO $tableNamePrefix". "tickets VALUES ( " .
-            "'$ticket_id', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ".
-            "'$name', '$email', '$order_number', '$tag', '', '0', '0', '0', " .
-            "'$email_opt_in' );";
-
-
-        $result = mysqli_query( $ts_mysqlLink, $query );
-
-        if( $result ) {
-            $found_unused_id = 1;
-
-            ts_log( "Ticket $ticket_id created by $remoteIP" );
-
-            
-            echo "$ticket_id";
+        if( $email == "" ) {
+            echo "Invalid email address: $unfilteredEmail<br>";
+            $failedCount++;
             }
         else {
-            global $debug;
-            if( $debug == 1 ) {
-                echo "Duplicate ids?  Error:  " .
-                    mysqli_error( $ts_mysqlLink ) ."<br>";
+            $nameFromEmail =
+                ts_requestFilter( "name_from_email", "/[01]/", "0" );
+            
+            $name = "";
+    
+            if( ! $nameFromEmail ) {
+                
+                $name = ts_requestFilter( "name", "/[A-Z0-9.' -]+/i" );
+                
+                // some names have ' in them
+                // need to escape this for use in DB query
+                $name = mysqli_real_escape_string( $ts_mysqlLink, $name );
                 }
-            // try again
-            $salt += 1;
+            else {
+                $emailParts = preg_split( "/@/", $email );
+                
+                if( count( $emailParts ) == 2 ) {
+                    $name = $emailParts[0];
+                    }
+                }
+            
+
+    
+            $found_unused_id = 0;
+            $salt = 0;
+            
+            
+            while( ! $found_unused_id ) {
+        
+        
+        
+                $ticket_id = "";
+                
+                // repeat hashing new rand values, mixed with our secret
+                // for security, until we have generated enough digits.
+                while( strlen( $ticket_id ) < $ticketIDLength ) {
+                    
+                    $randVal = rand();
+                    
+                    $hash_bin =
+                        ts_hmac_sha1_raw( $ticketGenerationSecret,
+                                          $name . uniqid( "$randVal"."$salt",
+                                                          true ) );
+                    
+            
+                    $hash_base32 = ts_readableBase32Encode( $hash_bin );
+                    
+                    $digitsLeft = $ticketIDLength - strlen( $ticket_id );
+                    
+                    $ticket_id = $ticket_id . substr( $hash_base32,
+                                                      0, $digitsLeft );
+                    }
+                
+        
+                // break into "-" separated chunks of 5 digits
+                $ticket_id_chunks = str_split( $ticket_id, 5 );
+                
+                $ticket_id = implode( "-", $ticket_id_chunks );
+                
+                
+                
+                /*
+                  "ticket_id VARCHAR(255) NOT NULL PRIMARY KEY," .
+                  "sale_date DATETIME NOT NULL," .
+                  "last_download_date DATETIME NOT NULL," .
+                  "name TEXT NOT NULL, ".
+                  "email CHAR(255) NOT NULL," .
+                  "order_number CHAR(255) NOT NULL," .
+                  "tag CHAR(255) NOT NULL," .
+                  "coupon_code TEXT NOT NULL," .
+                  "email_sent TINYINT NOT NULL," .
+                  "blocked TINYINT NOT NULL," .
+                  "download_count INT, ".
+                  "email_opt_in TINYINT NOT NULL );";
+                */
+                
+
+                // opt-in to emails by default
+                $query = "INSERT INTO $tableNamePrefix". "tickets VALUES ( " .
+                    "'$ticket_id', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ".
+                    "'$name', '$email', '$order_number', ".
+                    "'$tag', '', '0', '0', '0', " .
+                    "'$email_opt_in' );";
+
+
+                $result = mysqli_query( $ts_mysqlLink, $query );
+                
+                if( $result ) {
+                    $found_unused_id = 1;
+                    
+                    ts_log( "Ticket $ticket_id created by $remoteIP" );
+                    
+
+                    if( ! $manual ) {
+                        echo "$ticket_id";
+                        }
+                    else {
+                        echo "$email<br>$ticket_id<br><br>\n";
+                        }
+                    $successCount++;
+                    }
+                else {
+                    global $debug;
+                    if( $debug == 1 ) {
+                        echo "Duplicate ids?  Error:  " .
+                            mysqli_error( $ts_mysqlLink ) ."<br>";
+                        }
+                    // try again
+                    $salt += 1;
+                    }
+                }
+
             }
         }
 
+    if( $manual ) {
+        echo "<br><br>Summary:  $failedCount Failed, ".
+        "$successCount newly created";
+        }
     }
 
 
@@ -1400,6 +1465,7 @@ function ts_showData( $checkPassword = true ) {
             "OR email LIKE '%$search%' ".
             "OR ticket_id LIKE '%$search%' ".
             "OR coupon_code LIKE '%$search%' ".
+            "OR order_number LIKE '%$search%' ".
             "OR tag LIKE '%$search%' ) ";
 
         $searchDisplay = " matching <b>$search</b>";
@@ -1628,6 +1694,65 @@ function ts_showData( $checkPassword = true ) {
 
 
 
+
+    // form for force-creating a bunch of new ids in bulk
+?>
+        <td>
+        Create Multiple Tickets:<br>
+            <FORM ACTION="server.php" METHOD="post">
+    <INPUT TYPE="hidden" NAME="security_data" VALUE="<?php echo $data;?>">
+    <INPUT TYPE="hidden" NAME="action" VALUE="sell_ticket">
+    <INPUT TYPE="hidden" NAME="manual" VALUE="1">
+    <INPUT TYPE="hidden" NAME="bulk" VALUE="1">
+    <INPUT TYPE="hidden" NAME="name_from_email" VALUE="1">      
+
+          Emails (one per line):<br>
+             <TEXTAREA NAME="emails" COLS=40 ROWS=10></TEXTAREA><br>
+    Order #:
+    <INPUT TYPE="text" MAXLENGTH=40 SIZE=20 NAME="reference"><br>
+    Tag:
+    <SELECT NAME="tags">
+<?php
+
+    // auto-gen a drop-down list of available tags
+    global $allowedDownloadDates;
+    
+    foreach( $allowedDownloadDates as $tag => $date ){
+        echo "<OPTION VALUE=\"$tag\">$tag</OPTION>";
+        }
+?>
+    </SELECT><br>
+    Fake security hash:
+    <SELECT NAME="security_hash">
+<?php
+
+    // auto-gen a drop-down list of hashes for available tags
+    global $allowedDownloadDates;
+
+    foreach( $allowedDownloadDates as $tag => $date ){
+        $string_to_hash = $data . $fastspringPrivateKeys[$tag];
+        
+        $hash = md5( $string_to_hash );
+
+        echo "<OPTION VALUE=\"$hash\">$tag</OPTION>";
+        }
+?>
+    </SELECT><br>
+
+    <INPUT TYPE="checkbox" NAME="email_opt_in" VALUE=0>
+          Force email opt-out<br>
+          
+    <INPUT TYPE="Submit" VALUE="Generate">
+    </FORM>
+        </td>
+<?php
+
+          
+
+
+          
+
+
     // form for sending out download emails
 ?>
         <td>
@@ -1646,8 +1771,10 @@ function ts_showData( $checkPassword = true ) {
         }
 ?>
     </SELECT><br>
-    Batch size:      
+    Batch size:<br>      
     <INPUT TYPE="text" MAXLENGTH=10 SIZE=10 NAME="batch_size" VALUE="10"><br>
+    Order number filter:<br>      
+    <INPUT TYPE="text" MAXLENGTH=10 SIZE=10 NAME="order_number_filter" VALUE=""><br>
     <INPUT TYPE="checkbox" NAME="confirm" VALUE=1> Confirm<br>      
     <INPUT TYPE="Submit" VALUE="Send">
     </FORM>
@@ -1879,10 +2006,6 @@ function ts_sendGroupEmail() {
 
     $confirm = ts_requestFilter( "confirm", "/[01]/" );
     
-    if( $confirm != 1 ) {
-        echo "You must check the Confirm box to send emails\n";
-        return;
-        }
     
 
     $batch_size = ts_requestFilter( "batch_size", "/[0-9]+/", 0 );
@@ -1895,12 +2018,49 @@ function ts_sendGroupEmail() {
         $batchClause = " LIMIT 0, $batch_size ";
         }
     
+
+    $order_number_filter = ts_requestFilter( "order_number_filter",
+                                             "/[A-Z0-9-]+/i", "" );
+
+    $orderFilterClause = "";
+
+    if( $order_number_filter != "" ) {
+        $orderFilterClause = "AND order_number LIKE '%$order_number_filter%'";
+        }
     
 
     $query = "SELECT * FROM $tableNamePrefix"."tickets ".
         "WHERE tag = '$tag' AND email_sent = '0' AND blocked = '0' ".
+        " $orderFilterClause ".
         "ORDER BY sale_date ASC $batchClause;";
 
+    
+    if( $confirm != 1 ) {
+        echo "You must check the Confirm box to send emails<br><br>";
+
+        $result = ts_queryDatabase( $query );
+
+        $numRows = mysqli_num_rows( $result );
+
+        echo "Would have sent emails to these $numRows people:<br><br>";
+
+        echo "<table border=1 cellspacing=0 cellpadding=10>\n";
+        
+        for( $i=0; $i<$numRows; $i++ ) {
+            $email = ts_mysqli_result( $result, $i, "email" );
+            $tag = ts_mysqli_result( $result, $i, "tag" );
+            $order_number = ts_mysqli_result( $result, $i, "order_number" );
+
+            echo
+                "<tr><td>$email</td><td>$order_number</td><td>$tag</td></tr>\n";
+            }
+        echo "</table>\n";
+        
+        return;
+        }
+
+
+    
     ts_sendEmail_q( $query );
     }
 
@@ -2072,7 +2232,17 @@ function ts_printSendAllNoteForm( $inSetMessageSubject, $inSetMessageBody ) {
     global $useBulkEmailerForNotes;
 
     if( $useBulkEmailerForNotes ) {
-        echo "<OPTION VALUE=\"BULK_TO_ALL\">BULK_TO_ALL</OPTION>";
+        $totalTickets = ts_mysqli_result( $result, 0, 0 );
+
+        $numToSkip = 0;
+        global $bulkEmailBatchSize;
+    
+        while( $totalTickets > 0 ) {
+            echo "<OPTION VALUE=\"BULK_BATCH_$numToSkip\">".
+                "BULK_BATCH_$numToSkip</OPTION>";
+            $totalTickets -= $bulkEmailBatchSize;
+            $numToSkip += $bulkEmailBatchSize;
+            }
         }
     
 ?>
@@ -2140,7 +2310,8 @@ function ts_sendAllNote() {
     
     if( count( $tagParts ) == 3 ) {
         
-        if( $tagParts[0] == "ALL" && $tagParts[1] == "BATCH" ) {
+        if( ( $tagParts[0] == "ALL"  || $tagParts[0] == "BULK" ) &&
+            $tagParts[1] == "BATCH" ) {
 
             // Only send one batch now, according to tag
             $numToSkip = $tagParts[2];
@@ -2149,17 +2320,18 @@ function ts_sendAllNote() {
             $numToSkip += $message_skip;
             
             global $emailMaxBatchSize;
+
+            $batchSize = $emailMaxBatchSize;
+
+            if( $tagParts[0] == "BULK" ) {
+                global $bulkEmailBatchSize;
+                $batchSize = $bulkEmailBatchSize;
+                $useBulk = 1;
+                }
             
             $query = "SELECT * FROM $tableNamePrefix"."tickets ".
                 "WHERE blocked = '0' AND email_opt_in = '1' ".
-                "ORDER BY sale_date ASC LIMIT $numToSkip, $emailMaxBatchSize;";
-            }
-        else if( $tagParts[0] == "BULK" && $tagParts[2] == "ALL" ) {
-            // send to all
-            $query = "SELECT * FROM $tableNamePrefix"."tickets ".
-                "WHERE blocked = '0' AND email_opt_in = '1' ".
-                "ORDER BY sale_date ASC;";
-            $useBulk = 1;
+                "ORDER BY sale_date ASC LIMIT $numToSkip, $batchSize;";
             }
         }
     
